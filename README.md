@@ -105,8 +105,43 @@ A secure and easy-to-use payment gateway plugin that integrates PayToday payment
 - Supports PayToday payments for WooCommerce
 - Basic payment processing and order management
 
+## Troubleshooting
+
+### Common Issues
+
+**Payment not processing:**
+- Verify API credentials are correct
+- Check if sandbox mode settings match your environment
+- Ensure return URL is accessible
+
+**Orders not updating:**
+- Verify webhook URLs are configured correctly
+- Check WordPress and server logs for errors
+- Ensure proper SSL configuration
+
+**Plugin not appearing:**
+- Verify WooCommerce is active and up to date
+- Check for plugin conflicts
+- Review PHP error logs
+
 ## Support
 
-- **Phone**: [+264814578396](tel:+264814578396)
+- **Email**: [support@paytoday.com](mailto:support@paytoday.com)
 - **Website**: [https://paytoday.com](https://paytoday.com)
-- **Documentation**: [PayToday Developer Docs](https://site.paytoday.com.na/help-center/custom-web-integrations/)
+- **Documentation**: [PayToday Developer Docs](https://docs.paytoday.com)
+
+## License
+
+This plugin is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+We welcome contributions! Please feel free to submit issues and pull requests.
+
+## Security
+
+If you discover any security-related issues, please email [security@paytoday.com](mailto:security@paytoday.com) instead of using the issue tracker.
+
+---
+
+**Made by the PayToday Team**

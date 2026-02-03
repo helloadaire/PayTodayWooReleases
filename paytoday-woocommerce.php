@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: PayToday Payment Gateway for WooCommerce
- * Version: 1.1.0
+ * Version: 1.1.2
  * Author: PayToday
  * Author URI: https://site.paytoday.com.na/
  * Description: Accept payments using PayToday payment gateway in WooCommerce
@@ -14,6 +14,176 @@
  /*
  * This action hook registers our PHP class as a WooCommerce payment gateway
  */
+
+// =========================
+// Plugin Update Checker
+// =========================
+require_once __DIR__ . '/plugin-update-checker/plugin-update-checker.php';
+use YahnisElsts\PluginUpdateChecker\v5\PucFactory;
+
+$myUpdateChecker = PucFactory::buildUpdateChecker(
+    'https://raw.githubusercontent.com/helloadaire/PayToday-Update-JSON/master/update-info.json',
+    __FILE__,
+    'paytoday-woocommerce'
+);
+
+// =========================
+// Version Rollback
+// =========================
+
+// Clear version cache when plugin is updated
+add_action('upgrader_process_complete', function($upgrader, $hook_extra) {
+    if (isset($hook_extra['plugin']) && $hook_extra['plugin'] === plugin_basename(__FILE__)) {
+        delete_transient('paytoday_latest_version');
+        error_log('[PayToday Rollback] Plugin updated - cleared version cache');
+    }
+}, 10, 2);
+
+// Also clear cache when plugin is activated (in case version changed)
+add_action('activated_plugin', function($plugin) {
+    if ($plugin === plugin_basename(__FILE__)) {
+        delete_transient('paytoday_latest_version');
+        error_log('[PayToday Rollback] Plugin activated - cleared version cache');
+    }
+});
+
+// Add rollback link in plugin row (only if current version is the latest)
+add_filter('plugin_action_links_' . plugin_basename(__FILE__), function ($links) {
+    // Get current version dynamically from plugin header
+    $plugin_data = get_plugin_data(__FILE__);
+    $current_version = $plugin_data['Version'];
+    $is_latest_version = true;
+    
+    // Log the current version
+    error_log('[PayToday Rollback] Current version: ' . $current_version);
+    
+    // Check if there's a newer version available by directly checking the JSON file
+    // Cache the result for 1 hour to avoid checking too frequently
+    $cache_key = 'paytoday_latest_version';
+    $cached_version = get_transient($cache_key);
+    
+    // Force refresh cache if we're on a newer version than what's cached
+    if ($cached_version !== false && $cached_version !== 'error') {
+        if (version_compare($current_version, $cached_version, '>')) {
+            error_log('[PayToday Rollback] Current version is newer than cached version - clearing cache');
+            delete_transient($cache_key);
+            $cached_version = false;
+        }
+    }
+    
+    if ($cached_version === false) {
+        // Cache expired or doesn't exist, fetch from JSON
+        $json_url = 'https://raw.githubusercontent.com/helloadaire/PayToday-Update-JSON/master/update-info.json';
+        $response = wp_remote_get($json_url, array('timeout' => 5));
+        
+        if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+            $json_data = json_decode(wp_remote_retrieve_body($response), true);
+            if ($json_data && isset($json_data['version'])) {
+                $latest_version = $json_data['version'];
+                error_log('[PayToday Rollback] Latest available version from JSON: ' . $latest_version);
+                
+                // Cache the result for 1 hour
+                set_transient($cache_key, $latest_version, HOUR_IN_SECONDS);
+                
+                if (version_compare($current_version, $latest_version, '<')) {
+                    $is_latest_version = false;
+                    error_log('[PayToday Rollback] Hiding rollback link - newer version available: ' . $latest_version);
+                }
+            } else {
+                error_log('[PayToday Rollback] Invalid JSON data received');
+                set_transient($cache_key, 'error', HOUR_IN_SECONDS);
+            }
+        } else {
+            error_log('[PayToday Rollback] Failed to fetch JSON: ' . (is_wp_error($response) ? $response->get_error_message() : 'HTTP ' . wp_remote_retrieve_response_code($response)));
+            set_transient($cache_key, 'error', HOUR_IN_SECONDS);
+        }
+    } else {
+        // Use cached version
+        if ($cached_version !== 'error') {
+            error_log('[PayToday Rollback] Using cached latest version: ' . $cached_version);
+            if (version_compare($current_version, $cached_version, '<')) {
+                $is_latest_version = false;
+                error_log('[PayToday Rollback] Hiding rollback link - newer version available: ' . $cached_version);
+            }
+        } else {
+            error_log('[PayToday Rollback] Using cached error state - showing rollback link');
+        }
+    }
+    
+    // Only show rollback link if current version is the latest
+    if ($is_latest_version) {
+        error_log('[PayToday Rollback] Showing rollback link - current version is latest');
+        $links[] = '<a href="' . esc_url(admin_url('admin-post.php?action=my_plugin_rollback&_wpnonce=' . wp_create_nonce('my_plugin_rollback'))) . '" class="my-plugin-rollback-btn">Rollback</a>';
+    }
+    
+    return $links;
+});
+
+// Handle rollback request
+add_action('admin_post_my_plugin_rollback', function () {
+    if (!current_user_can('update_plugins')) {
+        wp_die('Unauthorized');
+    }
+
+    if (!isset($_GET['_wpnonce']) || !wp_verify_nonce($_GET['_wpnonce'], 'my_plugin_rollback')) {
+        error_log('[PayToday Rollback] Nonce verification failed');
+        wp_die('Security check failed.');
+    }
+
+    // URL to the previous version ZIP
+    $previous_version_zip = 'https://github.com/helloadaire/PayTodayWooReleases/releases/download/v1.1.1/paytoday_woo_v1.1.1.zip';
+    error_log('[PayToday Rollback] Attempting rollback to: ' . $previous_version_zip);
+
+    require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/misc.php';
+
+    $plugin_slug = plugin_basename(__FILE__);
+
+    // Deactivate current plugin
+    deactivate_plugins($plugin_slug);
+    error_log('[PayToday Rollback] Plugin deactivated.');
+
+    // Delete current plugin folder
+    $plugin_dir = plugin_dir_path(__FILE__);
+    if (WP_Filesystem()) {
+        global $wp_filesystem;
+        if ($wp_filesystem->delete($plugin_dir, true, true)) {
+            error_log('[PayToday Rollback] Plugin folder deleted successfully.');
+        } else {
+            error_log('[PayToday Rollback] Failed to delete plugin folder.');
+            wp_die('Failed to delete current plugin folder. Check debug.log.');
+        }
+    }
+
+    // Install previous version using Automatic_Upgrader_Skin (shows standard WP install page)
+    $upgrader = new Plugin_Upgrader(new Automatic_Upgrader_Skin());
+    $result = $upgrader->install($previous_version_zip);
+
+    if ($result && !is_wp_error($result)) {
+        activate_plugin($plugin_slug);
+        error_log('[PayToday Rollback] Rollback successful and plugin activated.');
+        wp_safe_redirect(admin_url('plugins.php?rollback=success'));
+    } else {
+        error_log('[PayToday Rollback] Rollback failed: ' . print_r($result, true));
+        wp_safe_redirect(admin_url('plugins.php?rollback=failed'));
+    }
+
+    exit;
+});
+
+// Show admin notice
+add_action('admin_notices', function () {
+    if (!isset($_GET['rollback'])) return;
+    if ($_GET['rollback'] === 'success') {
+        echo '<div class="notice notice-success is-dismissible"><p>Plugin rolled back successfully and activated.</p></div>';
+    } elseif ($_GET['rollback'] === 'failed') {
+        echo '<div class="notice notice-error is-dismissible"><p>Rollback failed. Check debug.log for details.</p></div>';
+    }
+});
+
+
 
 add_filter( 'woocommerce_payment_gateways', 'payToday_add_gateway_class' );
 function payToday_add_gateway_class( $gateways ) {
@@ -123,14 +293,14 @@ function payToday_init_gateway_class() {
                     'title'       => 'Title',
                     'type'        => 'text',
                     'description' => 'This controls the title which the user sees during checkout.',
-                    'default'     => 'Credit Card',
+                    'default'     => 'PayToday',
                     'desc_tip'    => true,
                 ),
                 'description' => array(
                     'title'       => 'Description',
                     'type'        => 'textarea',
                     'description' => 'This controls the description which the user sees during checkout.',
-                    'default'     => 'Pay with your credit card via our super-cool payment gateway.',
+                    'default'     => 'Pay with PayToday.',
                 ),
                 'sandbox_mode' => array(
                     'title'       => 'Sandbox mode',
