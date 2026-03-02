@@ -267,9 +267,9 @@ function payToday_init_gateway_class() {
             
             // You can also register a webhook here
             // add_action( 'woocommerce_api_{webhook name}', array( $this, 'webhook' ) );
-            // ✅ Register WooCommerce API endpoint for front-channel return
+            // Register WooCommerce API endpoint for front-channel return
             add_action( 'woocommerce_api_paytoday_return', array( $this, 'handle_paytoday_return' ) );
-            // ✅ Define explicit return URL for PayToday redirect
+            // Define explicit return URL for PayToday redirect
             $this->return_url = home_url( '/wc-api/paytoday_return' );
             // removed: add_action( 'wp_footer', array( $this, 'add_payment_popup_script' ) ); // popup disabled
 
@@ -1089,30 +1089,74 @@ function payToday_init_gateway_class() {
         // }
     
         /**
-         * Handle front-channel return from PayToday
+         * Handle front-channel return from PayToday.
+         * Payment state is determined only by server-side status API verification, not GET parameters.
          */
         public function handle_paytoday_return() {
-            $status           = isset($_GET['status']) ? sanitize_text_field( wp_unslash( $_GET['status'] ) ) : '';
             $gateway_ref      = isset($_GET['reference']) ? sanitize_text_field( wp_unslash( $_GET['reference'] ) ) : '';
-            $invoice_number   = isset($_GET['invoice_number']) ? absint( $_GET['invoice_number'] ) : 0;
+            $invoice_number  = isset($_GET['invoice_number']) ? absint( $_GET['invoice_number'] ) : 0;
             $reference_number = isset($_GET['reference_number']) ? sanitize_text_field( wp_unslash( $_GET['reference_number'] ) ) : '';
 
-            if ( ! $invoice_number ) { status_header(400); echo 'Missing invoice_number.'; exit; }
+            if ( ! $invoice_number ) {
+                status_header( 400 );
+                echo 'Missing invoice_number.';
+                exit;
+            }
             $order = wc_get_order( $invoice_number );
-            if ( ! $order ) { status_header(404); echo 'Order not found.'; exit; }
+            if ( ! $order ) {
+                status_header( 404 );
+                echo 'Order not found.';
+                exit;
+            }
 
-            if ( strtolower( $status ) === 'success' ) {
+            $payment_token = get_post_meta( $invoice_number, '_paytoday_payment_token', true );
+            $authorization_token = get_post_meta( $invoice_number, '_paytoday_authorization_token', true );
+
+            if ( ! $payment_token || ! $authorization_token ) {
+                $this->log( 'Return: no payment tokens for order ' . $invoice_number . ', cannot verify.' );
+                wp_safe_redirect( wc_get_checkout_url() );
+                exit;
+            }
+
+            $status_result = $this->query_payment_intent( $payment_token, $authorization_token );
+
+            if ( isset( $status_result['error'] ) ) {
+                $this->log( 'Return: status API error for order ' . $invoice_number . ': ' . $status_result['error'] );
+                if ( $order->has_status( array( 'pending', 'on-hold' ) ) ) {
+                    wp_schedule_single_event( time() + 15, 'paytoday_check_payment_status', array( $invoice_number, $payment_token, $authorization_token ) );
+                }
+                wp_safe_redirect( $this->get_return_url( $order ) );
+                exit;
+            }
+
+            $payment_status = null;
+            if ( isset( $status_result->data ) && isset( $status_result->data->intent ) && isset( $status_result->data->intent->transaction_status ) ) {
+                $payment_status = $status_result->data->intent->transaction_status;
+            }
+
+            if ( $payment_status === 'completed' || $payment_status === 'success' ) {
                 if ( $order->has_status( array( 'pending', 'failed', 'on-hold' ) ) ) {
                     $order->payment_complete( $gateway_ref ?: null );
-                    $order->add_order_note( 'PayToday: payment success. Reference: ' . $gateway_ref . ' / Ref No: ' . $reference_number );
+                    $order->add_order_note( 'PayToday: payment verified via API. Reference: ' . $gateway_ref . ' / Ref No: ' . $reference_number );
                 }
-                wp_safe_redirect( $this->get_return_url( $order ) ); exit;
+                wp_safe_redirect( $this->get_return_url( $order ) );
+                exit;
             }
 
-            if ( ! $order->has_status( 'failed' ) ) {
-                $order->update_status( 'failed', 'PayToday: payment failed or cancelled. Status=' . $status . ' Reference=' . $gateway_ref );
+            if ( $payment_status === 'failed' || $payment_status === 'cancelled' ) {
+                if ( ! $order->has_status( 'failed' ) ) {
+                    $order->update_status( 'failed', 'PayToday: payment failed or cancelled (verified via API).' );
+                }
+                wp_safe_redirect( wc_get_checkout_url() );
+                exit;
             }
-            wp_safe_redirect( wc_get_checkout_url() ); exit;
+
+            $this->log( 'Return: order ' . $invoice_number . ' still pending (status: ' . ( $payment_status ?: 'unknown' ) . '), scheduling follow-up check.' );
+            if ( $order->has_status( array( 'pending', 'on-hold' ) ) ) {
+                wp_schedule_single_event( time() + 15, 'paytoday_check_payment_status', array( $invoice_number, $payment_token, $authorization_token ) );
+            }
+            wp_safe_redirect( $this->get_return_url( $order ) );
+            exit;
         }
 }
 }
