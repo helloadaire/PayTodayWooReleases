@@ -51,17 +51,8 @@ When a customer completes a payment, PayToday redirects them to the `Return URL`
 
 == Upgrade Notice ==
 
-= 1.1.0 =
-Updated version with improved plugin structure and documentation.
-
-= 1.0.0 =
-First release. No upgrades necessary.
-
-== Screenshots ==
-
-1. PayToday payment gateway settings in WooCommerce.
-2. WooCommerce checkout page with PayToday as a payment method.
-3. Successful payment redirect after processing.
+== 1.1.3 ==
+Made critical security fixes
 
 == Acknowledgements ==
 

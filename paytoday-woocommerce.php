@@ -1,7 +1,7 @@
 <?php
 /**
  * Plugin Name: PayToday Payment Gateway for WooCommerce
- * Version: 1.1.2
+ * Version: 1.1.3
  * Author: PayToday
  * Author URI: https://site.paytoday.com.na/
  * Description: Accept payments using PayToday payment gateway in WooCommerce
@@ -131,7 +131,7 @@ add_action('admin_post_my_plugin_rollback', function () {
     }
 
     // URL to the previous version ZIP
-    $previous_version_zip = 'https://github.com/helloadaire/PayTodayWooReleases/releases/download/v1.1.1/paytoday_woo_v1.1.1.zip';
+    $previous_version_zip = 'https://github.com/helloadaire/PayTodayWooReleases/releases/download/v1.1.2/paytoday_woo_v1.1.2.zip';
     error_log('[PayToday Rollback] Attempting rollback to: ' . $previous_version_zip);
 
     require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
