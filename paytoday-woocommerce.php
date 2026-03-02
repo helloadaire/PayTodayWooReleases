@@ -1120,7 +1120,8 @@ function payToday_init_gateway_class() {
 
             $status_result = $this->query_payment_intent( $payment_token, $authorization_token );
 
-            if ( isset( $status_result['error'] ) ) {
+            // Handle error result when query_payment_intent() returns an array with an 'error' key
+            if ( is_array( $status_result ) && isset( $status_result['error'] ) ) {
                 $this->log( 'Return: status API error for order ' . $invoice_number . ': ' . $status_result['error'] );
                 if ( $order->has_status( array( 'pending', 'on-hold' ) ) ) {
                     wp_schedule_single_event( time() + 15, 'paytoday_check_payment_status', array( $invoice_number, $payment_token, $authorization_token ) );
